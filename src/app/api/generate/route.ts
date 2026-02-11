@@ -1,8 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { NextRequest, NextResponse } from 'next/server';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-
 async function callWithRetry(fn: () => Promise<unknown>, retries = 2): Promise<unknown> {
   for (let i = 0; i <= retries; i++) {
     try {
@@ -30,6 +28,7 @@ interface GeminiResponse {
 }
 
 export async function POST(req: NextRequest) {
+  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
   try {
     const { prompt, images } = await req.json();
 
