@@ -18,21 +18,28 @@ export function buildImg2ImgPrompt(opts: {
   clothingSource: 'target' | 'source';
   customPrompt: string;
   imageSize: string;
+  hasBackground?: boolean;
+  sourceImageCount?: number;
 }) {
   const { clothingSource, customPrompt, imageSize } = opts;
+  const srcCount = opts.sourceImageCount ?? 1;
   const framing = detectFraming(customPrompt);
+
+  const srcLabel = srcCount === 1 ? '"SOURCE_IDENTITY_REFERENCE"' : `"SOURCE_IDENTITY_REFERENCE_1" through "SOURCE_IDENTITY_REFERENCE_${srcCount}"`;
+  const srcClothingLabel = srcCount === 1 ? '"SOURCE_IDENTITY_REFERENCE"' : 'the "SOURCE_IDENTITY_REFERENCE" images';
 
   const clothingLine = framing === 'close-up'
     ? ''
     : `5. CLOTHING SPECIFICATION: ${
         clothingSource === 'target'
           ? 'The subject MUST wear the exact clothing, outfit, and accessories seen in the "TARGET_SCENE_CONTEXT".'
-          : 'The subject MUST wear the clothing and outfit seen in the "SOURCE_IDENTITY_REFERENCE".'
+          : `The subject MUST wear the clothing and outfit seen in ${srcClothingLabel}.`
       }`;
 
   return `TASK: High-Fidelity Photorealistic Persona Transplantation.
 
-PRIMARY GOAL: Replace the person in "TARGET_SCENE_CONTEXT" with the identity from "SOURCE_IDENTITY_REFERENCE".
+PRIMARY GOAL: Replace the person in "TARGET_SCENE_CONTEXT" with the identity from ${srcLabel}${opts.hasBackground ? ', and reconstruct the scene so it takes place in the environment/setting shown in "BACKGROUND_IMAGE" — adapted to fit the target\'s pose, camera angle, and foreground context' : ''}.
+${srcCount > 1 ? `\nMULTIPLE SOURCE REFERENCES: ${srcCount} images of the SAME person have been provided (${srcLabel}). These show the subject from different angles and/or lighting conditions. You MUST cross-reference ALL of them to build an accurate, comprehensive understanding of the subject's facial geometry, bone structure, skin texture, and features. More references = higher fidelity. Do NOT rely on just one — synthesize them all.` : ''}
 
 CRITICAL QUALITY STANDARDS — YOU MUST FOLLOW ALL OF THESE. FAILURE ON ANY ONE IS A FAILED OUTPUT:
 1. EXPRESSION MATCHING: You MUST synchronize the facial expression EXACTLY. The final subject MUST replicate the precise smile, eye-squint, brow-tension, and mouth position of the original person in "TARGET_SCENE_CONTEXT". DO NOT use a neutral or static expression from the reference. DO NOT default to a generic smile. MATCH THE EXACT EXPRESSION.
@@ -40,16 +47,23 @@ CRITICAL QUALITY STANDARDS — YOU MUST FOLLOW ALL OF THESE. FAILURE ON ANY ONE 
 3. NEURAL BLENDING: Seamless integration is MANDATORY. Match skin pores, subsurface scattering (light through skin), and global illumination of the scene PERFECTLY. ABSOLUTELY NO sharp "cut-and-paste" edges. ABSOLUTELY NO "Microsoft Paint" artifacts. If the blending looks artificial, the output is FAILED.
 4. PHOTOREALISM: The result MUST look like a raw, unedited photograph taken by a real camera. Maintain natural shadows and reflections from the target scene. DO NOT make it look AI-generated, smoothed, or synthetic.
 ${clothingLine}
+${opts.hasBackground ? `6. BACKGROUND REPLACEMENT — CONTEXTUAL COMPOSITING:
+   A "BACKGROUND_IMAGE" has been provided. Your job is NOT to naively paste the subject onto this background. You MUST:
+   a) ANALYZE the "TARGET_SCENE_CONTEXT" first — understand the subject's pose, body position, interaction with objects (furniture, surfaces, props), camera angle, perspective, and depth of field.
+   b) EXTRACT the environment, aesthetic, and setting from "BACKGROUND_IMAGE" — the location type, colors, textures, atmosphere, and ambient lighting. IGNORE any people in it.
+   c) RECONSTRUCT the scene: Place the subject (with their pose and object interactions from the target) into a new environment that matches the VIBE and SETTING of the "BACKGROUND_IMAGE", but is adapted to be physically plausible given the subject's pose and camera angle. If the subject is sitting at a table, there must still be a table — but the surrounding environment changes.
+   d) RE-LIGHT the subject to match the new environment's lighting conditions (color temperature, direction, intensity, ambient vs directional light ratio).
+   e) The result must look like the photo was ORIGINALLY TAKEN in the background's environment — not composited after the fact.` : ''}
 
 MANDATORY CONSTRAINTS — NON-NEGOTIABLE:
 ${bodyConstraints(framing)}
 
 REFERENCE SCOPE — READ THIS CAREFULLY:
-ONLY use the FACE and IDENTITY from "SOURCE_IDENTITY_REFERENCE". You MUST IGNORE the body, clothing, pose, and background of that image. DO NOT carry over ANY element from the source image except the face and identity. This is CRITICAL.
+ONLY use the FACE and IDENTITY from ${srcLabel}. You MUST IGNORE the body, clothing, pose, and background of ${srcCount === 1 ? 'that image' : 'those images'}. DO NOT carry over ANY element from the source ${srcCount === 1 ? 'image' : 'images'} except the face and identity. This is CRITICAL.
 
 INSTRUCTIONS: ${customPrompt}
 
-EXECUTION: Analyze the labels. Transplant the "SOURCE_IDENTITY" into the "TARGET_SCENE". Match expressions PERFECTLY. Render at ${imageSize} resolution. The output MUST be a clean photograph with NO overlays, NO labels, NO banners, NO watermarks.`;
+EXECUTION: Analyze the labels. ${srcCount > 1 ? `Cross-reference ALL ${srcCount} source identity images to` : 'Use the source identity to'} transplant the subject into the "TARGET_SCENE". Match expressions PERFECTLY. Render at ${imageSize} resolution. The output MUST be a clean photograph with NO overlays, NO labels, NO banners, NO watermarks.`;
 }
 
 export const PROMPT_ENGINEER_SYSTEM = `You are a strict, precise prompt engineer for Gemini's image generation model. You craft detailed, unambiguous generation prompts. You are NOT chatty. You are NOT wishy-washy. You give clear, decisive direction.

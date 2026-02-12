@@ -9,9 +9,10 @@ interface Props {
 }
 
 export default function FaceSwapPanel({ onImageGenerated }: Props) {
-  const [sourceImage, setSourceImage] = useState<string | null>(null);
+  const [sourceImages, setSourceImages] = useState<string[]>([]);
   const [targetImage, setTargetImage] = useState<string | null>(null);
   const [customPrompt, setCustomPrompt] = useState('');
+  const [backgroundImage, setBackgroundImage] = useState<string | null>(null);
   const [clothingSource, setClothingSource] = useState<'target' | 'source'>('target');
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -31,27 +32,41 @@ export default function FaceSwapPanel({ onImageGenerated }: Props) {
   }, [handleFile]);
 
   const generate = async () => {
-    if (!sourceImage || !targetImage) return;
+    if (sourceImages.length === 0 || !targetImage) return;
     setLoading(true);
     setError(null);
     setGeneratedImage(null);
 
     try {
-      const [labeledSource, labeledTarget] = await Promise.all([
-        labelImage(sourceImage, 'SOURCE_IDENTITY_REFERENCE'),
-        labelImage(targetImage, 'TARGET_SCENE_CONTEXT'),
-      ]);
+      const labeledSources = await Promise.all(
+        sourceImages.map((img, i) =>
+          labelImage(img, sourceImages.length === 1 ? 'SOURCE_IDENTITY_REFERENCE' : `SOURCE_IDENTITY_REFERENCE_${i + 1}`)
+        )
+      );
+      const labeledTarget = await labelImage(targetImage, 'TARGET_SCENE_CONTEXT');
+
+      const labeledBg = backgroundImage
+        ? await labelImage(backgroundImage, 'BACKGROUND_IMAGE')
+        : null;
 
       const prompt = buildImg2ImgPrompt({
         clothingSource,
         customPrompt: customPrompt || 'Transplant the source identity into the target scene naturally.',
         imageSize: '2K',
+        hasBackground: !!backgroundImage,
+        sourceImageCount: sourceImages.length,
       });
+
+      const images = [
+        ...(labeledBg ? [labeledBg] : []),
+        ...labeledSources,
+        labeledTarget,
+      ];
 
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, images: [labeledSource, labeledTarget] }),
+        body: JSON.stringify({ prompt, images }),
       });
 
       const data = await res.json();
@@ -153,20 +168,53 @@ export default function FaceSwapPanel({ onImageGenerated }: Props) {
             <p className="text-xs text-gray-400 mt-0.5">Upload a source identity and the image to copy</p>
           </div>
 
+          <div>
+            <p className="text-xs font-medium text-gray-600 mb-1">Source Identity ({sourceImages.length}/4)</p>
+            <p className="text-[10px] text-gray-400 mb-2">Upload multiple angles for better likeness</p>
+            <div className="grid grid-cols-4 gap-2 mb-4">
+              {sourceImages.map((img, i) => (
+                <div key={i} className="relative group">
+                  <img src={img} alt={`Source ${i + 1}`} className="w-full rounded-xl object-cover aspect-square" />
+                  <button
+                    onClick={() => setSourceImages(prev => prev.filter((_, j) => j !== i))}
+                    className="absolute top-1 right-1 w-5 h-5 bg-black/60 text-white rounded-full flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              {sourceImages.length < 4 && (
+                <label
+                  onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f, (url) => setSourceImages(prev => [...prev, url])); }}
+                  onDragOver={(e) => e.preventDefault()}
+                  onMouseEnter={() => { hoveredSetterRef.current = (url: string) => setSourceImages(prev => [...prev, url]); }}
+                  onMouseLeave={() => { hoveredSetterRef.current = null; }}
+                  className="flex flex-col items-center justify-center aspect-square border-2 border-dashed border-gray-200 rounded-xl cursor-pointer hover:border-gray-300 hover:bg-gray-50/50 transition-colors"
+                >
+                  <svg className="w-5 h-5 text-gray-300 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
+                  </svg>
+                  <span className="text-[10px] text-gray-400">Add</span>
+                  <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f, (url) => setSourceImages(prev => [...prev, url])); }} />
+                </label>
+              )}
+            </div>
+          </div>
+
           <div className="flex gap-4">
-            <UploadZone
-              label="Source Identity"
-              sublabel="The face to transplant"
-              image={sourceImage}
-              onSet={setSourceImage}
-              onClear={() => setSourceImage(null)}
-            />
             <UploadZone
               label="Target Scene"
               sublabel="The image to replicate"
               image={targetImage}
               onSet={setTargetImage}
               onClear={() => setTargetImage(null)}
+            />
+            <UploadZone
+              label="Background Image"
+              sublabel="Optional scene/setting"
+              image={backgroundImage}
+              onSet={setBackgroundImage}
+              onClear={() => setBackgroundImage(null)}
             />
           </div>
 
@@ -203,7 +251,7 @@ export default function FaceSwapPanel({ onImageGenerated }: Props) {
 
           <button
             onClick={generate}
-            disabled={!sourceImage || !targetImage || loading}
+            disabled={sourceImages.length === 0 || !targetImage || loading}
             className="w-full py-3 bg-black text-white text-sm font-medium rounded-xl hover:bg-gray-800 transition-colors disabled:opacity-30"
           >
             {loading ? 'Generating...' : 'Generate'}
